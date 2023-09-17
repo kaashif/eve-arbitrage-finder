@@ -29,6 +29,8 @@ missing:
 I think all of this is really cool. Honestly I spend more time on data analysis
 than actually playing EVE.
 
+There might also be weird patterns around e.g. time of day, day of week.
+
 # What's missing?
 
 The big one is hooking this up to live market data from
@@ -44,6 +46,9 @@ investment where I've bought at a reasonable price and someone has a
 ridiculously highly priced buy order I'm chasing. What if they cancel it? It
 would be nice to know which end of the trade is mispriced (i.e. significantly
 different from the regional average price).
+
+Are mispriced buys more common than mispriced sells? Or vice versa? Why might
+that be? I really don't know.
 
 # What's the end goal?
 
