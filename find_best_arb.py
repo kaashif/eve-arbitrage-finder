@@ -6,6 +6,7 @@ import csv
 import datetime
 import networkx as nx
 from io import StringIO
+from fastavro import reader
 
 def read_jump_graph():
     with bz2.open("mapSolarSystemJumps.csv.bz2", mode="r") as data_csv:
@@ -23,13 +24,25 @@ def read_jump_graph():
 G = read_jump_graph()
 
 
-def read_order_file(filename):
+def read_order_file_csv(filename):
     with bz2.open(filename, mode="r") as data_csv:
         contents = data_csv.read()
 
     contents_f = StringIO(bytes.decode(contents, "utf-8"))
     reader = csv.DictReader(contents_f)
-    return reader
+
+    for row in reader:
+        row["price"] = float(row["price"])
+        row["volume_remain"] = int(row["volume_remain"])
+        row["min_volume"] = int(row["min_volume"])
+        row["is_buy_order"] = row["is_buy_order"] == 'true'
+        yield row
+
+def read_order_file_avro(filename):
+    with open(filename, "rb") as f:
+        for r in reader(f):
+            r["system_id"] = str(r["system_id"])
+            yield r
 
 def arbitrage_stats(arbitrage, wallet_amount):
     max_quantity = min(arbitrage[0]["volume_remain"], arbitrage[1]["volume_remain"])
@@ -68,23 +81,25 @@ def get_sorted_arb_stats(arbitrages, wallet_amount):
 
 
 def get_best_arb(filename, index):
-
-    reader = read_order_file(filename)
+    if filename.endswith(".csv.bz2"):
+        reader = read_order_file_csv(filename)
+    elif filename.endswith(".avro"):
+        reader = read_order_file_avro(filename)
+    else:
+        raise Exception(f"can't read {filename}")
 
     type_id_to_buys_and_sells = {}
 
     for row in reader:
-        row["price"] = float(row["price"])
-        row["volume_remain"] = int(row["volume_remain"])
-        row["min_volume"] = int(row["min_volume"])
         type_id = row["type_id"]
+        
         if type_id not in type_id_to_buys_and_sells:
             buys_and_sells = {"buys": [], "sells": []}
             type_id_to_buys_and_sells[type_id] = buys_and_sells
         else:
             buys_and_sells = type_id_to_buys_and_sells[type_id]
 
-        if row["is_buy_order"] == 'true':
+        if row["is_buy_order"]:
             buys_and_sells["buys"].append(row)
         else:
             buys_and_sells["sells"].append(row)
@@ -116,7 +131,6 @@ def get_best_arb(filename, index):
                     # arbitrage found!
                     arbitrages.append((sell, buy))
 
-
     wallet_amt_to_arb_stats = {k:get_sorted_arb_stats(arbitrages, k) for k in [1_000_000, 10_000_000, 100_000_000, 1_000_000_000]}
 
     # We need to annotate each arbitrage with its distance
@@ -144,7 +158,7 @@ def get_best_arb(filename, index):
         amt_to_valid_arbitrages[amt].sort(key=lambda a: a["adj_return_per_jump"], reverse=True)
 
     for amt, arbs in amt_to_valid_arbitrages.items():
-        print(str(index) + "," + str(amt) + "," + str(arbs[0]["adj_return_per_jump"] + "," + str(arbs[0]["adj_return"])))
+        print(str(index) + "," + str(amt) + "," + str(arbs[0]["adj_return_per_jump"]) + "," + str(arbs[0]["adj_return"]))
 
 
 
