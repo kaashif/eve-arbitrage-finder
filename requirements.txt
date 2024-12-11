@@ -1,0 +1,6 @@
+pyspark
+networkx
+numpy
+plotly
+matplotlib
+scipy
