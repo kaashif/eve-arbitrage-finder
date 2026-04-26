@@ -4,6 +4,7 @@ data.everef.net/
 __pycache__/
 *.pyc
 *.parquet
+arbitrage_time_analysis_top100.csv
 mapSolarSystemJumps.csv
 mapSolarSystemJumps.csv.bz2
 invTypes.csv

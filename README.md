@@ -5,7 +5,9 @@ The repo does not include market data. Use `fetch_sample_data.sh` to download a
 small historical sample and the static EVE data files needed by the scripts.
 
 Currently I've only done some analysis on historical data, see the notebook
-`find_arbitrages.ipynb`.
+`find_arbitrages.ipynb`. `arbitrage_time_analysis.ipynb` ranks opportunities
+with a 45 second per jump travel-time model and classifies whether the sell or
+buy side looks mispriced against the market average.
 
 # Quick start
 
