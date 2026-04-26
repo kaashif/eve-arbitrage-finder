@@ -2,12 +2,14 @@
 Arbitrage finder for EVE Online but with more useful financial analytics.
 
 The repo does not include market data. Use `fetch_sample_data.sh` to download a
-small historical sample and the static EVE data files needed by the scripts.
+small historical sample of consecutive snapshots and the static EVE data files
+needed by the scripts.
 
 Currently I've only done some analysis on historical data, see the notebook
 `find_arbitrages.ipynb`. `arbitrage_time_analysis.ipynb` ranks opportunities
-with a 45 second per jump travel-time model and classifies whether the sell or
-buy side looks mispriced against the market average.
+with a 45 second per jump travel-time model, checks whether the destination buy
+order is still present in the first snapshot at or after arrival, and classifies
+whether the sell or buy side looks mispriced against the market average.
 
 # Quick start
 
@@ -23,7 +25,8 @@ For the Spark notebook and plotting dependencies, install the analysis extra:
 uv sync --extra analysis
 ```
 
-Download one historical market-order snapshot plus static lookup data:
+Download two consecutive historical market-order snapshots plus static lookup
+data:
 
 ```sh
 ./fetch_sample_data.sh

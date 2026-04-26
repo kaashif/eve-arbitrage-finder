@@ -2,8 +2,8 @@ import bz2
 import csv
 import heapq
 import re
-from collections import defaultdict
 from dataclasses import dataclass
+from bisect import bisect_left
 from pathlib import Path
 
 import networkx as nx
@@ -21,11 +21,14 @@ DEFAULT_TYPES_FILE = "invTypes.csv"
 @dataclass(frozen=True)
 class AnalysisConfig:
     market_file: str = DEFAULT_MARKET_FILE
+    market_glob: str = (
+        "data.everef.net/market-orders/history/2023/2023-01-01/"
+        "market-orders-2023-01-01_*.v3.csv.bz2"
+    )
     jumps_file: str = DEFAULT_JUMPS_FILE
     types_file: str = DEFAULT_TYPES_FILE
     wallet_amount: int = 100_000_000
     seconds_per_jump: int = 45
-    snapshot_window_seconds: int = 15 * 60
     top_n: int = 100
     per_type_candidate_limit: int = 25
 
@@ -58,6 +61,40 @@ def snapshot_time_from_filename(filename):
     return pd.to_datetime(match.group(1), format="%Y-%m-%d_%H-%M-%S", utc=True)
 
 
+def market_snapshots(config):
+    paths = sorted(Path().glob(config.market_glob))
+    if not paths:
+        paths = [Path(config.market_file)]
+
+    snapshots = []
+    for path in paths:
+        snapshot_time = snapshot_time_from_filename(str(path))
+        if snapshot_time is not None:
+            snapshots.append((snapshot_time, str(path)))
+
+    return sorted(snapshots, key=lambda item: item[0])
+
+
+def round_up_snapshot(snapshots, arrival_time):
+    times = [snapshot_time for snapshot_time, _ in snapshots]
+    index = bisect_left(times, arrival_time)
+    if index == len(snapshots):
+        return None, None
+    return snapshots[index]
+
+
+def load_buy_order_snapshots(snapshots):
+    orders_by_snapshot = {}
+    for snapshot_time, path in snapshots:
+        df = pd.read_csv(
+            path,
+            usecols=["order_id", "is_buy_order", "price", "volume_remain", "min_volume"],
+        )
+        buys = df[df["is_buy_order"]].set_index("order_id", drop=False)
+        orders_by_snapshot[snapshot_time] = buys
+    return orders_by_snapshot
+
+
 def classify_mispricing(sell_price, buy_price, market_average_price):
     sell_is_low = sell_price < market_average_price
     buy_is_high = buy_price > market_average_price
@@ -74,6 +111,8 @@ def classify_mispricing(sell_price, buy_price, market_average_price):
 def build_arbitrage_table(config=AnalysisConfig()):
     orders = pd.read_csv(config.market_file)
     orders = orders[orders["universe_id"] == "eve"].copy()
+    snapshots = market_snapshots(config)
+    buy_orders_by_snapshot = load_buy_order_snapshots(snapshots)
 
     market_average = (
         orders.assign(volume_x_price=orders["volume_remain"] * orders["price"])
@@ -132,19 +171,44 @@ def build_arbitrage_table(config=AnalysisConfig()):
                 profit = float(executed_quantity * (buy["price"] - sell["price"]))
                 charged_travel_legs = max(1, jumps)
                 route_seconds = int(charged_travel_legs * config.seconds_per_jump)
-                possible_within_snapshot = route_seconds <= config.snapshot_window_seconds
+                arrival_time = snapshot_time + pd.Timedelta(seconds=route_seconds)
+                arrival_snapshot_time, arrival_snapshot_path = round_up_snapshot(
+                    snapshots, arrival_time
+                )
                 isk_per_hour = profit / route_seconds * 3600 if route_seconds else float("inf")
                 total_return_pct = 100 * profit / investment if investment else 0
                 wallet_return_pct = 100 * profit / config.wallet_amount
-                can_take_advantage = possible_within_snapshot and profit > 0
-                feasibility_note = (
-                    "route fits within 15m snapshot window"
-                    if can_take_advantage
-                    else "route exceeds 15m snapshot window"
-                )
+                buy_order_still_available = False
+                arrival_buy_price = None
+                arrival_buy_volume_remain = None
+                feasibility_note = "no snapshot at or after arrival time"
+
+                if arrival_snapshot_time is not None:
+                    arrival_buys = buy_orders_by_snapshot[arrival_snapshot_time]
+                    if buy["order_id"] in arrival_buys.index:
+                        arrival_buy_order = arrival_buys.loc[buy["order_id"]]
+                        arrival_buy_price = float(arrival_buy_order["price"])
+                        arrival_buy_volume_remain = int(arrival_buy_order["volume_remain"])
+                        buy_order_still_available = (
+                            arrival_buy_price >= buy["price"]
+                            and arrival_buy_volume_remain >= executed_quantity
+                            and executed_quantity >= int(arrival_buy_order["min_volume"])
+                        )
+                        feasibility_note = (
+                            "destination buy order still covers the trade"
+                            if buy_order_still_available
+                            else "destination buy order changed or lacks enough volume"
+                        )
+                    else:
+                        feasibility_note = "destination buy order is gone by arrival snapshot"
+
+                can_take_advantage = buy_order_still_available and profit > 0
 
                 row = {
                     "snapshot_time": snapshot_time,
+                    "arrival_time": arrival_time,
+                    "arrival_snapshot_time": arrival_snapshot_time,
+                    "arrival_snapshot_file": arrival_snapshot_path,
                     "type_id": int(type_id),
                     "item_name": type_names.get(int(type_id), str(type_id)),
                     "mispricing_type": classify_mispricing(
@@ -162,7 +226,9 @@ def build_arbitrage_table(config=AnalysisConfig()):
                     "charged_travel_legs": int(charged_travel_legs),
                     "route_seconds": route_seconds,
                     "route_minutes": route_seconds / 60,
-                    "possible_within_15m_snapshot": possible_within_snapshot,
+                    "buy_order_still_available_at_arrival": buy_order_still_available,
+                    "arrival_buy_price": arrival_buy_price,
+                    "arrival_buy_volume_remain": arrival_buy_volume_remain,
                     "can_take_advantage": can_take_advantage,
                     "feasibility_note": feasibility_note,
                     "executable_quantity": int(executed_quantity),
@@ -188,7 +254,7 @@ def build_arbitrage_table(config=AnalysisConfig()):
         return table
 
     return table.sort_values(
-        ["possible_within_15m_snapshot", "isk_per_hour"],
+        ["can_take_advantage", "isk_per_hour"],
         ascending=[False, False],
     ).reset_index(drop=True)
 
@@ -198,11 +264,11 @@ def summarize_table(table):
         return pd.DataFrame()
 
     return (
-        table.groupby(["possible_within_15m_snapshot", "mispricing_type"])
+        table.groupby(["can_take_advantage", "mispricing_type"])
         .size()
         .rename("count")
         .reset_index()
-        .sort_values(["possible_within_15m_snapshot", "count"], ascending=[False, False])
+        .sort_values(["can_take_advantage", "count"], ascending=[False, False])
     )
 
 
