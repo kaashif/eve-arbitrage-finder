@@ -1,1 +1,9 @@
 data/
+data.everef.net/
+.venv/
+__pycache__/
+*.pyc
+*.parquet
+mapSolarSystemJumps.csv
+mapSolarSystemJumps.csv.bz2
+invTypes.csv

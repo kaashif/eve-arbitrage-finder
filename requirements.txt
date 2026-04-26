@@ -1,3 +1,6 @@
+pandas
+fastavro
+pyarrow
 pyspark
 networkx
 numpy

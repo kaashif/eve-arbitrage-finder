@@ -1,11 +1,72 @@
 # eve-arbitrage-finder
 Arbitrage finder for EVE Online but with more useful financial analytics.
 
-This repo as-is is non-functional, it's missing all of the data files and any
-instructions.
+The repo does not include market data. Use `fetch_sample_data.sh` to download a
+small historical sample and the static EVE data files needed by the scripts.
 
 Currently I've only done some analysis on historical data, see the notebook
 `find_arbitrages.ipynb`.
+
+# Quick start
+
+Create a virtualenv and install the dependencies:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Download one historical market-order snapshot plus static lookup data:
+
+```sh
+./fetch_sample_data.sh
+```
+
+The script checks `Content-Length` before downloading and refuses to fetch more
+than 1 GiB by default. To use a different cap:
+
+```sh
+MAX_BYTES=500000000 ./fetch_sample_data.sh
+```
+
+Run the plain Python arbitrage finder against the sample snapshot:
+
+```sh
+python find_best_arb.py \
+  data.everef.net/market-orders/history/2023/2023-01-01/market-orders-2023-01-01_00-15-03.v3.csv.bz2
+```
+
+The output is CSV-like:
+
+```text
+snapshot_index,wallet_amount,adj_return_per_jump,adj_return
+```
+
+`find_best_arb.py` currently prints the rows without that header.
+
+To convert the sample snapshot to parquet:
+
+```sh
+python convert_file_to_parquet.py \
+  data.everef.net/market-orders/history/2023/2023-01-01/market-orders-2023-01-01_00-15-03.v3.csv.bz2
+```
+
+# Notes from a fresh run
+
+These were the main things that needed working out:
+
+* `download.sh` recursively downloads a whole Everef directory, which is easy to
+  make much larger than intended. `fetch_sample_data.sh` downloads one known
+  snapshot and checks the size first.
+* `find_best_arb.py` expects `mapSolarSystemJumps.csv.bz2`, while Fuzzwork
+  serves `mapSolarSystemJumps.csv`. The sample-data script downloads the CSV and
+  creates the `.bz2` copy.
+* `requirements.txt` was missing packages used by the scripts: `pandas`,
+  `fastavro`, and `pyarrow`.
+* `find_best_arb.py` accepts `.csv.bz2` and `.avro` inputs. The local variable
+  name says `parquet_filenames`, but parquet input is not implemented there yet.
 
 # Why are you working on this?
 
