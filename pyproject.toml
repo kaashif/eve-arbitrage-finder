@@ -1,0 +1,24 @@
+[project]
+name = "eve-arbitrage-finder"
+version = "0.1.0"
+description = "Arbitrage finder for EVE Online historical market data"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastavro",
+    "networkx",
+    "pandas",
+    "pyarrow",
+]
+
+[project.optional-dependencies]
+analysis = [
+    "matplotlib",
+    "numpy",
+    "plotly",
+    "pyspark",
+    "scipy",
+]
+
+[tool.uv]
+package = false

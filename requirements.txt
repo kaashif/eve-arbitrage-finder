@@ -1,9 +1,0 @@
-pandas
-fastavro
-pyarrow
-pyspark
-networkx
-numpy
-plotly
-matplotlib
-scipy

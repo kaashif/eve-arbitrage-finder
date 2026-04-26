@@ -9,13 +9,16 @@ Currently I've only done some analysis on historical data, see the notebook
 
 # Quick start
 
-Create a virtualenv and install the dependencies:
+Install the dependencies:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+uv sync
+```
+
+For the Spark notebook and plotting dependencies, install the analysis extra:
+
+```sh
+uv sync --extra analysis
 ```
 
 Download one historical market-order snapshot plus static lookup data:
@@ -34,7 +37,7 @@ MAX_BYTES=500000000 ./fetch_sample_data.sh
 Run the plain Python arbitrage finder against the sample snapshot:
 
 ```sh
-python find_best_arb.py \
+uv run python find_best_arb.py \
   data.everef.net/market-orders/history/2023/2023-01-01/market-orders-2023-01-01_00-15-03.v3.csv.bz2
 ```
 
@@ -49,7 +52,7 @@ snapshot_index,wallet_amount,adj_return_per_jump,adj_return
 To convert the sample snapshot to parquet:
 
 ```sh
-python convert_file_to_parquet.py \
+uv run python convert_file_to_parquet.py \
   data.everef.net/market-orders/history/2023/2023-01-01/market-orders-2023-01-01_00-15-03.v3.csv.bz2
 ```
 
@@ -63,8 +66,8 @@ These were the main things that needed working out:
 * `find_best_arb.py` expects `mapSolarSystemJumps.csv.bz2`, while Fuzzwork
   serves `mapSolarSystemJumps.csv`. The sample-data script downloads the CSV and
   creates the `.bz2` copy.
-* `requirements.txt` was missing packages used by the scripts: `pandas`,
-  `fastavro`, and `pyarrow`.
+* The script dependencies are listed in `pyproject.toml`; Spark and plotting
+  packages are available through the `analysis` extra.
 * `find_best_arb.py` accepts `.csv.bz2` and `.avro` inputs. The local variable
   name says `parquet_filenames`, but parquet input is not implemented there yet.
 
