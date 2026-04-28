@@ -567,12 +567,25 @@ fn read_market_orders(path: &Path) -> Result<Vec<OrderRecord>> {
     let min_volume_idx = idx("min_volume")?;
     let system_id_idx = idx("system_id")?;
     let type_id_idx = idx("type_id")?;
-    let universe_idx = idx("universe_id")?;
+    let universe_idx = headers.iter().position(|header| header == "universe_id");
 
     let mut orders = Vec::new();
     for record in csv.records() {
         let record = record?;
-        if record.get(universe_idx) != Some("eve") {
+        if universe_idx.is_some_and(|index| record.get(index) != Some("eve")) {
+            continue;
+        }
+        if [
+            order_id_idx,
+            price_idx,
+            volume_remain_idx,
+            min_volume_idx,
+            system_id_idx,
+            type_id_idx,
+        ]
+        .iter()
+        .any(|&index| record.get(index).is_none_or(str::is_empty))
+        {
             continue;
         }
         orders.push(OrderRecord {
