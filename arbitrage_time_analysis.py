@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from bisect import bisect_left
 from pathlib import Path
+from typing import Optional
 
 import networkx as nx
 import pandas as pd
@@ -29,7 +30,7 @@ class AnalysisConfig:
     types_file: str = DEFAULT_TYPES_FILE
     wallet_amount: int = 100_000_000
     seconds_per_jump: int = 45
-    top_n: int = 100
+    top_n: Optional[int] = 100
     per_type_candidate_limit: int = 25
 
 
@@ -108,11 +109,21 @@ def classify_mispricing(sell_price, buy_price, market_average_price):
     return "unclear_vs_average"
 
 
-def build_arbitrage_table(config=AnalysisConfig()):
+def build_arbitrage_table(
+    config=AnalysisConfig(),
+    snapshots=None,
+    buy_orders_by_snapshot=None,
+    graph=None,
+    type_names=None,
+):
     orders = pd.read_csv(config.market_file)
     orders = orders[orders["universe_id"] == "eve"].copy()
-    snapshots = market_snapshots(config)
-    buy_orders_by_snapshot = load_buy_order_snapshots(snapshots)
+    snapshots = snapshots if snapshots is not None else market_snapshots(config)
+    buy_orders_by_snapshot = (
+        buy_orders_by_snapshot
+        if buy_orders_by_snapshot is not None
+        else load_buy_order_snapshots(snapshots)
+    )
 
     market_average = (
         orders.assign(volume_x_price=orders["volume_remain"] * orders["price"])
@@ -123,11 +134,14 @@ def build_arbitrage_table(config=AnalysisConfig()):
         market_average["total_value"] / market_average["total_volume"]
     )
 
-    graph = read_jump_graph(config.jumps_file)
-    type_names = read_type_names(config.types_file)
+    graph = graph if graph is not None else read_jump_graph(config.jumps_file)
+    type_names = type_names if type_names is not None else read_type_names(config.types_file)
     snapshot_time = snapshot_time_from_filename(config.market_file)
+    distance_cache = {}
 
     best = []
+    rows = []
+    keep_all = config.top_n is None or config.top_n <= 0
 
     for type_id, group in orders.groupby("type_id", sort=False):
         sells = group[~group["is_buy_order"]].sort_values("price", ascending=True)
@@ -154,12 +168,15 @@ def build_arbitrage_table(config=AnalysisConfig()):
                     continue
                 if not graph.has_node(sell["system_id"]) or not graph.has_node(buy["system_id"]):
                     continue
-                try:
-                    jumps = nx.shortest_path_length(
-                        graph, int(sell["system_id"]), int(buy["system_id"])
-                    )
-                except nx.NetworkXNoPath:
-                    continue
+                system_pair = (int(sell["system_id"]), int(buy["system_id"]))
+                if system_pair in distance_cache:
+                    jumps = distance_cache[system_pair]
+                else:
+                    try:
+                        jumps = nx.shortest_path_length(graph, *system_pair)
+                    except nx.NetworkXNoPath:
+                        continue
+                    distance_cache[system_pair] = jumps
 
                 max_quantity = min(int(sell["volume_remain"]), int(buy["volume_remain"]))
                 affordable_quantity = int(config.wallet_amount // sell["price"])
@@ -242,14 +259,16 @@ def build_arbitrage_table(config=AnalysisConfig()):
                 }
 
                 score = row["isk_per_hour"]
-                if len(best) < config.top_n:
+                if keep_all:
+                    rows.append(row)
+                elif len(best) < config.top_n:
                     heapq.heappush(best, (score, row["sell_order_id"], row["buy_order_id"], row))
                 elif score > best[0][0]:
                     heapq.heapreplace(
                         best, (score, row["sell_order_id"], row["buy_order_id"], row)
                     )
 
-    table = pd.DataFrame([row for _, _, _, row in best])
+    table = pd.DataFrame(rows if keep_all else [row for _, _, _, row in best])
     if table.empty:
         return table
 

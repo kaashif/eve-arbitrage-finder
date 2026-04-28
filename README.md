@@ -1,7 +1,7 @@
 # eve-arbitrage-finder
 Arbitrage finder for EVE Online but with more useful financial analytics.
 
-The repo does not include market data. Use `fetch_sample_data.sh` to download a
+The repo does not include market data. Use `fetch_sample_data.py` to download a
 small historical sample of consecutive snapshots and the static EVE data files
 needed by the scripts.
 
@@ -26,18 +26,27 @@ uv sync --extra analysis
 ```
 
 Download two consecutive historical market-order snapshots plus static lookup
-data:
+data, including system names, coordinates, and jump links:
 
 ```sh
-./fetch_sample_data.sh
+uv run python fetch_sample_data.py
 ```
 
 The script checks `Content-Length` before downloading and refuses to fetch more
 than 1 GiB by default. To use a different cap:
 
 ```sh
-MAX_BYTES=500000000 ./fetch_sample_data.sh
+MAX_BYTES=500000000 uv run python fetch_sample_data.py
 ```
+
+To fetch a full day of historical snapshots for day-level analysis:
+
+```sh
+./fetch_day_data.sh
+```
+
+The default day is `2023-01-01`; set `DATE=YYYY-MM-DD` to use another date if
+the Everef path exists.
 
 Run the plain Python arbitrage finder against the sample snapshot:
 
@@ -61,13 +70,63 @@ uv run python convert_file_to_parquet.py \
   data.everef.net/market-orders/history/2023/2023-01-01/market-orders-2023-01-01_00-15-03.v3.csv.bz2
 ```
 
+To scan a full day and find the best single feasible arbitrage trip for a 1B
+ISK wallet:
+
+```sh
+uv run python simulate_day.py --mode single --wallet 1000000000
+```
+
+The simulator uses `45s * max(1, gate_jumps)` as the travel time, rounds up to
+the first available snapshot at or after arrival, and only marks the trade
+feasible if the destination buy order is still present with enough volume at
+that arrival snapshot.
+
+To export every arbitrage candidate considered by the travel-time model for
+the day:
+
+```sh
+uv run python export_all_arbitrages.py --wallet 1000000000
+```
+
+The faster Rust exporter writes a fixed-width binary output and memory-maps
+fixed-width order caches after the first run:
+
+```sh
+cargo run --release -- export \
+  --wallet 1000000000 \
+  --per-type-candidate-limit 25 \
+  --out day_arbitrages_all.bin
+```
+
+For compatibility with the current Python web API, also write CSV:
+
+```sh
+cargo run --release -- export \
+  --wallet 1000000000 \
+  --per-type-candidate-limit 25 \
+  --out day_arbitrages_all.bin \
+  --csv-out day_arbitrages_all.csv
+```
+
+To explore the arbitrage graph and timeline in the dynamic web UI, start the
+API and frontend in separate terminals:
+
+```sh
+uv run uvicorn web_api:app --host 127.0.0.1 --port 8000
+cd web && npm install && npm run dev
+```
+
+The Vite app proxies `/api` to FastAPI. It reads `day_simulation_1b.csv` and
+`arbitrage_time_analysis_top100.csv` when those generated files exist.
+
 # Notes from a fresh run
 
 These were the main things that needed working out:
 
 * `download.sh` recursively downloads a whole Everef directory, which is easy to
-  make much larger than intended. `fetch_sample_data.sh` downloads one known
-  snapshot and checks the size first.
+  make much larger than intended. `fetch_sample_data.py` downloads one known
+  snapshot pair plus static lookup data and checks the size first.
 * `find_best_arb.py` expects `mapSolarSystemJumps.csv.bz2`, while Fuzzwork
   serves `mapSolarSystemJumps.csv`. The sample-data script downloads the CSV and
   creates the `.bz2` copy.

@@ -5,6 +5,15 @@ __pycache__/
 *.pyc
 *.parquet
 arbitrage_time_analysis_top100.csv
+day_simulation_1b.csv
+day_arbitrages_all.csv
+day_arbitrages_all.bin
+profile_all_arb_1snap.prof
 mapSolarSystemJumps.csv
 mapSolarSystemJumps.csv.bz2
+mapSolarSystems.csv
 invTypes.csv
+web/dist/
+web/node_modules/
+.cache/
+target/

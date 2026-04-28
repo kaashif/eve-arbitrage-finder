@@ -5,10 +5,13 @@ description = "Arbitrage finder for EVE Online historical market data"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi",
     "fastavro",
     "networkx",
+    "numpy",
     "pandas",
     "pyarrow",
+    "uvicorn",
 ]
 
 [project.optional-dependencies]
