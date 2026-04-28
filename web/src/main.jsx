@@ -196,8 +196,8 @@ function RouteMap({ data, selectedSnapshot, highlightedRoute, setHighlightedRout
         ctx.lineWidth = 5 / transform.k;
         ctx.strokeStyle = "#05090e";
         ctx.fillStyle = "#d9f9ff";
-        ctx.strokeText(String(node.systemId), node.x + 11, node.y - 9);
-        ctx.fillText(String(node.systemId), node.x + 11, node.y - 9);
+        ctx.strokeText(node.name, node.x + 11, node.y - 9);
+        ctx.fillText(node.name, node.x + 11, node.y - 9);
       }
     }
 
