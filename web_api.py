@@ -227,6 +227,7 @@ def arbitrages(
     limit: int = Query(3000, ge=1, le=10000),
     min_profit: float = Query(0, ge=0),
     feasible_only: bool = True,
+    rank: str = Query("time", pattern="^(time|profit)$"),
 ):
     graph = jump_graph()
     systems = read_solar_systems()
@@ -236,7 +237,15 @@ def arbitrages(
         mask = records["profit"] >= min_profit
         if feasible_only:
             mask &= records["can_take_advantage"] != 0
-        selected_indices = np.flatnonzero(mask)[:limit]
+        candidate_indices = np.flatnonzero(mask)
+        if rank == "profit" and len(candidate_indices):
+            candidate_profits = records["profit"][candidate_indices]
+            top_count = min(limit, len(candidate_indices))
+            top_positions = np.argpartition(candidate_profits, -top_count)[-top_count:]
+            selected_indices = candidate_indices[top_positions]
+            selected_indices = selected_indices[np.argsort(records["profit"][selected_indices])[::-1]]
+        else:
+            selected_indices = candidate_indices[:limit]
         selected_rows = records[selected_indices]
         routes = [route_record(int(index), row, graph, names) for index, row in zip(selected_indices, selected_rows)]
     else:
@@ -245,7 +254,10 @@ def arbitrages(
             df = df[df["profit"] >= min_profit]
         if feasible_only and "can_take_advantage" in df.columns:
             df = df[df["can_take_advantage"].astype(bool)]
-        df = df.sort_values(["snapshot_time", "profit"], ascending=[True, False]).head(limit)
+        if rank == "profit":
+            df = df.sort_values("profit", ascending=False).head(limit)
+        else:
+            df = df.sort_values(["snapshot_time", "profit"], ascending=[True, False]).head(limit)
         routes = [route_record(index, row, graph, names) for index, row in df.iterrows()]
 
     directed_edges = {}

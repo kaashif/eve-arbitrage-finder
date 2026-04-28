@@ -351,10 +351,11 @@ function Stat({ icon: Icon, label, value }) {
 function App() {
   const [source, setSource] = useState("all");
   const [limit, setLimit] = useState(3000);
+  const [rank, setRank] = useState("time");
   const [minProfit, setMinProfit] = useState(0);
   const [selectedSnapshot, setSelectedSnapshot] = useState(null);
   const [highlightedRoute, setHighlightedRoute] = useState(null);
-  const { data, error } = useArbitrageData({ source, limit, min_profit: minProfit, feasible_only: true });
+  const { data, error } = useArbitrageData({ source, limit, min_profit: minProfit, feasible_only: true, rank });
 
   useEffect(() => {
     if (data?.snapshots?.length) setSelectedSnapshot(data.snapshots[0]);
@@ -377,6 +378,20 @@ function App() {
               <option value="day">Day simulation</option>
               <option value="all">All arbitrages</option>
               <option value="top100">Top 100 snapshot</option>
+            </select>
+          </label>
+          <label>
+            Rank
+            <select
+              value={rank}
+              onChange={(event) => {
+                const nextRank = event.target.value;
+                setRank(nextRank);
+                if (nextRank === "profit") setLimit(10);
+              }}
+            >
+              <option value="time">Timeline</option>
+              <option value="profit">Top profit</option>
             </select>
           </label>
           <label>
