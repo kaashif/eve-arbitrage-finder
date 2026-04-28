@@ -120,6 +120,10 @@ cargo run --release -- simulate-route \
   --out route_simulation_jita_profit_per_jump.csv
 ```
 
+Add `--allow-failed` to simulate the no-hindsight version of the same route
+choice, where the ship can chase a destination buy order that later disappears
+or no longer covers the trade.
+
 To explore the arbitrage graph and timeline in the dynamic web UI, start the
 API and frontend in separate terminals:
 

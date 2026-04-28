@@ -58,6 +58,8 @@ enum Command {
         #[arg(long, default_value_t = 100)]
         max_trips: usize,
         #[arg(long)]
+        allow_failed: bool,
+        #[arg(long)]
         out: Option<PathBuf>,
     },
 }
@@ -155,6 +157,7 @@ struct RouteTrip {
     arrival_snapshot_ts: i64,
     profit: f64,
     cumulative_profit: f64,
+    success: bool,
     sell_order_id: u64,
     buy_order_id: u64,
 }
@@ -189,8 +192,17 @@ fn main() -> Result<()> {
             start_system,
             seconds_per_jump,
             max_trips,
+            allow_failed,
             out,
-        } => simulate_route(&arbs_file, &jumps_file, start_system, seconds_per_jump, max_trips, out),
+        } => simulate_route(
+            &arbs_file,
+            &jumps_file,
+            start_system,
+            seconds_per_jump,
+            max_trips,
+            allow_failed,
+            out,
+        ),
     }
 }
 
@@ -267,6 +279,7 @@ fn simulate_route(
     start_system: u32,
     seconds_per_jump: i64,
     max_trips: usize,
+    allow_failed: bool,
     out: Option<PathBuf>,
 ) -> Result<()> {
     let graph = read_jump_graph(jumps_file)?;
@@ -277,7 +290,10 @@ fn simulate_route(
     let mut current_system = start_system;
     let mut current_time = records
         .iter()
-        .filter(|row| row.can_take_advantage != 0 && row.arrival_snapshot_ts != NO_SNAPSHOT_TS)
+        .filter(|row| {
+            (allow_failed || row.can_take_advantage != 0)
+                && row.arrival_snapshot_ts != NO_SNAPSHOT_TS
+        })
         .map(|row| row.snapshot_ts)
         .min()
         .ok_or_else(|| anyhow!("no feasible arbitrage records in {}", arbs_file.display()))?;
@@ -290,7 +306,9 @@ fn simulate_route(
         let mut best: Option<(f64, u16, u16, &ArbitrageRecord)> = None;
 
         for row in records {
-            if row.can_take_advantage == 0 || row.arrival_snapshot_ts == NO_SNAPSHOT_TS {
+            if (!allow_failed && row.can_take_advantage == 0)
+                || row.arrival_snapshot_ts == NO_SNAPSHOT_TS
+            {
                 continue;
             }
             if used_sell_orders.contains(&row.sell_order_id)
@@ -328,7 +346,10 @@ fn simulate_route(
             break;
         };
 
-        cumulative_profit += row.profit;
+        let success = row.can_take_advantage != 0;
+        if success {
+            cumulative_profit += row.profit;
+        }
         used_sell_orders.insert(row.sell_order_id);
         used_buy_orders.insert(row.buy_order_id);
         trips.push(RouteTrip {
@@ -345,6 +366,7 @@ fn simulate_route(
             arrival_snapshot_ts: row.arrival_snapshot_ts,
             profit: row.profit,
             cumulative_profit,
+            success,
             sell_order_id: row.sell_order_id,
             buy_order_id: row.buy_order_id,
         });
@@ -360,16 +382,18 @@ fn simulate_route(
 
     println!("start_system={start_system}");
     println!("trips={}", trips.len());
+    println!("failures={}", trips.iter().filter(|trip| !trip.success).count());
     println!("final_system={current_system}");
     println!("available_time={}", format_ts(current_time));
     println!("total_profit={cumulative_profit:.2}");
     println!(
-        "trip,score_profit_per_jump,reposition_jumps,trade_jumps,total_jumps,snapshot_time,arrival_snapshot_time,type_id,from_system,to_system,profit,cumulative_profit"
+        "trip,success,score_profit_per_jump,reposition_jumps,trade_jumps,total_jumps,snapshot_time,arrival_snapshot_time,type_id,from_system,to_system,expected_profit,cumulative_realized_profit"
     );
     for trip in trips.iter().take(25) {
         println!(
-            "{},{:.2},{},{},{},{},{},{},{},{},{:.2},{:.2}",
+            "{},{},{:.2},{},{},{},{},{},{},{},{},{:.2},{:.2}",
             trip.trip_index,
+            trip.success,
             trip.score_profit_per_jump,
             trip.reposition_jumps,
             trip.trade_jumps,
@@ -841,6 +865,7 @@ fn write_route_trips_csv(path: &Path, trips: &[RouteTrip]) -> Result<()> {
         "arrival_snapshot_time",
         "profit",
         "cumulative_profit",
+        "success",
         "sell_order_id",
         "buy_order_id",
     ])?;
@@ -859,6 +884,7 @@ fn write_route_trips_csv(path: &Path, trips: &[RouteTrip]) -> Result<()> {
             format_ts(trip.arrival_snapshot_ts),
             trip.profit.to_string(),
             trip.cumulative_profit.to_string(),
+            trip.success.to_string(),
             trip.sell_order_id.to_string(),
             trip.buy_order_id.to_string(),
         ])?;
