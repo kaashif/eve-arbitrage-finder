@@ -109,6 +109,17 @@ cargo run --release -- export \
   --csv-out day_arbitrages_all.csv
 ```
 
+To simulate one ship greedily chaining feasible arbitrages, starting in Jita by
+default, score each next trade by profit divided by the jumps to reposition to
+the buy location plus the trade route jumps:
+
+```sh
+cargo run --release -- simulate-route \
+  --start-system 30000142 \
+  --max-trips 100 \
+  --out route_simulation_jita_profit_per_jump.csv
+```
+
 To explore the arbitrage graph and timeline in the dynamic web UI, start the
 API and frontend in separate terminals:
 

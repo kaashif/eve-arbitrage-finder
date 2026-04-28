@@ -8,6 +8,7 @@ arbitrage_time_analysis_top100.csv
 day_simulation_1b.csv
 day_arbitrages_all.csv
 day_arbitrages_all.bin
+route_simulation_*.csv
 profile_all_arb_1snap.prof
 mapSolarSystemJumps.csv
 mapSolarSystemJumps.csv.bz2

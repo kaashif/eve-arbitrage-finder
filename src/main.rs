@@ -46,6 +46,20 @@ enum Command {
         #[arg(long)]
         csv_out: Option<PathBuf>,
     },
+    SimulateRoute {
+        #[arg(long, default_value = "day_arbitrages_all.bin")]
+        arbs_file: PathBuf,
+        #[arg(long, default_value = "mapSolarSystemJumps.csv")]
+        jumps_file: PathBuf,
+        #[arg(long, default_value_t = 30000142)]
+        start_system: u32,
+        #[arg(long, default_value_t = 45)]
+        seconds_per_jump: i64,
+        #[arg(long, default_value_t = 100)]
+        max_trips: usize,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[repr(C)]
@@ -127,6 +141,24 @@ struct DistanceCache<'a> {
     by_source: FxHashMap<u32, Vec<u16>>,
 }
 
+struct RouteTrip {
+    trip_index: usize,
+    score_profit_per_jump: f64,
+    reposition_jumps: u16,
+    trade_jumps: u16,
+    total_scored_jumps: u16,
+    depart_system: u32,
+    from_system: u32,
+    to_system: u32,
+    type_id: u32,
+    snapshot_ts: i64,
+    arrival_snapshot_ts: i64,
+    profit: f64,
+    cumulative_profit: f64,
+    sell_order_id: u64,
+    buy_order_id: u64,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -151,6 +183,14 @@ fn main() -> Result<()> {
             out,
             csv_out,
         }),
+        Command::SimulateRoute {
+            arbs_file,
+            jumps_file,
+            start_system,
+            seconds_per_jump,
+            max_trips,
+            out,
+        } => simulate_route(&arbs_file, &jumps_file, start_system, seconds_per_jump, max_trips, out),
     }
 }
 
@@ -216,6 +256,132 @@ fn export(config: ExportConfig) -> Result<()> {
     if let Some(csv_path) = config.csv_out {
         write_csv(&csv_path, &output)?;
         eprintln!("wrote CSV compatibility output to {}", csv_path.display());
+    }
+
+    Ok(())
+}
+
+fn simulate_route(
+    arbs_file: &Path,
+    jumps_file: &Path,
+    start_system: u32,
+    seconds_per_jump: i64,
+    max_trips: usize,
+    out: Option<PathBuf>,
+) -> Result<()> {
+    let graph = read_jump_graph(jumps_file)?;
+    let arbs = map_records::<ArbitrageRecord>(arbs_file, ARB_MAGIC)?;
+    let records = arbs.records();
+    let mut distance_cache = DistanceCache::new(&graph);
+
+    let mut current_system = start_system;
+    let mut current_time = records
+        .iter()
+        .filter(|row| row.can_take_advantage != 0 && row.arrival_snapshot_ts != NO_SNAPSHOT_TS)
+        .map(|row| row.snapshot_ts)
+        .min()
+        .ok_or_else(|| anyhow!("no feasible arbitrage records in {}", arbs_file.display()))?;
+    let mut used_sell_orders = FxHashSet::default();
+    let mut used_buy_orders = FxHashSet::default();
+    let mut trips = Vec::new();
+    let mut cumulative_profit = 0.0;
+
+    for trip_index in 1..=max_trips {
+        let mut best: Option<(f64, u16, u16, &ArbitrageRecord)> = None;
+
+        for row in records {
+            if row.can_take_advantage == 0 || row.arrival_snapshot_ts == NO_SNAPSHOT_TS {
+                continue;
+            }
+            if used_sell_orders.contains(&row.sell_order_id)
+                || used_buy_orders.contains(&row.buy_order_id)
+            {
+                continue;
+            }
+            let Some(reposition_jumps) = distance_cache.distance(current_system, row.from_system) else {
+                continue;
+            };
+            let reposition_seconds = i64::from(reposition_jumps) * seconds_per_jump;
+            if current_time + reposition_seconds > row.snapshot_ts {
+                continue;
+            }
+
+            let trade_jumps_for_score = row.gate_jumps.max(1);
+            let total_jumps = reposition_jumps.saturating_add(trade_jumps_for_score);
+            if total_jumps == 0 {
+                continue;
+            }
+            let score = row.profit / f64::from(total_jumps);
+
+            let replace = best
+                .as_ref()
+                .is_none_or(|(best_score, _, _, best_row)| {
+                    score > *best_score
+                        || (score == *best_score && row.profit > best_row.profit)
+                });
+            if replace {
+                best = Some((score, reposition_jumps, trade_jumps_for_score, row));
+            }
+        }
+
+        let Some((score, reposition_jumps, trade_jumps, row)) = best else {
+            break;
+        };
+
+        cumulative_profit += row.profit;
+        used_sell_orders.insert(row.sell_order_id);
+        used_buy_orders.insert(row.buy_order_id);
+        trips.push(RouteTrip {
+            trip_index,
+            score_profit_per_jump: score,
+            reposition_jumps,
+            trade_jumps,
+            total_scored_jumps: reposition_jumps + trade_jumps,
+            depart_system: current_system,
+            from_system: row.from_system,
+            to_system: row.to_system,
+            type_id: row.type_id,
+            snapshot_ts: row.snapshot_ts,
+            arrival_snapshot_ts: row.arrival_snapshot_ts,
+            profit: row.profit,
+            cumulative_profit,
+            sell_order_id: row.sell_order_id,
+            buy_order_id: row.buy_order_id,
+        });
+
+        current_system = row.to_system;
+        current_time = row.arrival_snapshot_ts;
+    }
+
+    if let Some(out) = out {
+        write_route_trips_csv(&out, &trips)?;
+        eprintln!("wrote {} route trips to {}", trips.len(), out.display());
+    }
+
+    println!("start_system={start_system}");
+    println!("trips={}", trips.len());
+    println!("final_system={current_system}");
+    println!("available_time={}", format_ts(current_time));
+    println!("total_profit={cumulative_profit:.2}");
+    println!(
+        "trip,score_profit_per_jump,reposition_jumps,trade_jumps,total_jumps,snapshot_time,arrival_snapshot_time,type_id,from_system,to_system,profit,cumulative_profit"
+    );
+    for trip in trips.iter().take(25) {
+        println!(
+            "{},{:.2},{},{},{},{},{},{},{},{},{:.2},{:.2}",
+            trip.trip_index,
+            trip.score_profit_per_jump,
+            trip.reposition_jumps,
+            trip.trade_jumps,
+            trip.total_scored_jumps,
+            format_ts(trip.snapshot_ts),
+            format_ts(trip.arrival_snapshot_ts),
+            trip.type_id,
+            trip.from_system,
+            trip.to_system,
+            trip.profit,
+            trip.cumulative_profit,
+        );
     }
 
     Ok(())
@@ -640,6 +806,48 @@ fn write_csv(path: &Path, rows: &[ArbitrageRecord]) -> Result<()> {
             row.wallet_return_pct.to_string(),
             row.sell_order_id.to_string(),
             row.buy_order_id.to_string(),
+        ])?;
+    }
+    writer.flush()?;
+    Ok(())
+}
+
+fn write_route_trips_csv(path: &Path, trips: &[RouteTrip]) -> Result<()> {
+    let mut writer = csv::Writer::from_path(path)?;
+    writer.write_record([
+        "trip_index",
+        "score_profit_per_jump",
+        "reposition_jumps",
+        "trade_jumps",
+        "total_scored_jumps",
+        "depart_system",
+        "from_system",
+        "to_system",
+        "type_id",
+        "snapshot_time",
+        "arrival_snapshot_time",
+        "profit",
+        "cumulative_profit",
+        "sell_order_id",
+        "buy_order_id",
+    ])?;
+    for trip in trips {
+        writer.write_record([
+            trip.trip_index.to_string(),
+            trip.score_profit_per_jump.to_string(),
+            trip.reposition_jumps.to_string(),
+            trip.trade_jumps.to_string(),
+            trip.total_scored_jumps.to_string(),
+            trip.depart_system.to_string(),
+            trip.from_system.to_string(),
+            trip.to_system.to_string(),
+            trip.type_id.to_string(),
+            format_ts(trip.snapshot_ts),
+            format_ts(trip.arrival_snapshot_ts),
+            trip.profit.to_string(),
+            trip.cumulative_profit.to_string(),
+            trip.sell_order_id.to_string(),
+            trip.buy_order_id.to_string(),
         ])?;
     }
     writer.flush()?;
